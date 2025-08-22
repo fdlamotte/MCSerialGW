@@ -656,36 +656,38 @@ void SensorMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender_i
     memcpy(&sender_timestamp, data, 4);  // timestamp (by sender's RTC clock - which could be wrong)
     uint flags = (data[4] >> 2);   // message attempt number, and other flags
 
-    if (!(flags == TXT_TYPE_CLI_DATA)) {
-      MESH_DEBUG_PRINTLN("onPeerDataRecv: unsupported text type received: flags=%02x", (uint32_t)flags);
-    } else if (sender_timestamp > from.last_timestamp) {  // prevent replay attacks
-      from.last_timestamp = sender_timestamp;
-      from.last_activity = getRTCClock()->getCurrentTime();
+    if (sender_timestamp > from.last_timestamp) {  // prevent replay attacks
+      if (!(flags == TXT_TYPE_CLI_DATA)) {
+        handleIncomingMsg(type, sender_timestamp, &data[5], flags, len - 5);
+      } else {  
+        from.last_timestamp = sender_timestamp;
+        from.last_activity = getRTCClock()->getCurrentTime();
 
-      // len can be > original length, but 'text' will be padded with zeroes
-      data[len] = 0; // need to make a C string again, with null terminator
+        // len can be > original length, but 'text' will be padded with zeroes
+        data[len] = 0; // need to make a C string again, with null terminator
 
-      uint8_t temp[166];
-      char *command = (char *) &data[5];
-      char *reply = (char *) &temp[5];
-      handleCommand(sender_timestamp, command, reply);
+        uint8_t temp[166];
+        char *command = (char *) &data[5];
+        char *reply = (char *) &temp[5];
+        handleCommand(sender_timestamp, command, reply);
 
-      int text_len = strlen(reply);
-      if (text_len > 0) {
-        uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
-        if (timestamp == sender_timestamp) {
-          // WORKAROUND: the two timestamps need to be different, in the CLI view
-          timestamp++;
-        }
-        memcpy(temp, &timestamp, 4);   // mostly an extra blob to help make packet_hash unique
-        temp[4] = (TXT_TYPE_CLI_DATA << 2);
+        int text_len = strlen(reply);
+        if (text_len > 0) {
+          uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
+          if (timestamp == sender_timestamp) {
+            // WORKAROUND: the two timestamps need to be different, in the CLI view
+            timestamp++;
+          }
+          memcpy(temp, &timestamp, 4);   // mostly an extra blob to help make packet_hash unique
+          temp[4] = (TXT_TYPE_CLI_DATA << 2);
 
-        auto reply = createDatagram(PAYLOAD_TYPE_TXT_MSG, from.id, secret, temp, 5 + text_len);
-        if (reply) {
-          if (from.out_path_len < 0) {
-            sendFlood(reply, CLI_REPLY_DELAY_MILLIS);
-          } else {
-            sendDirect(reply, from.out_path, from.out_path_len, CLI_REPLY_DELAY_MILLIS);
+          auto reply = createDatagram(PAYLOAD_TYPE_TXT_MSG, from.id, secret, temp, 5 + text_len);
+          if (reply) {
+            if (from.out_path_len < 0) {
+              sendFlood(reply, CLI_REPLY_DELAY_MILLIS);
+            } else {
+              sendDirect(reply, from.out_path, from.out_path_len, CLI_REPLY_DELAY_MILLIS);
+            }
           }
         }
       }
@@ -693,6 +695,10 @@ void SensorMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender_i
       MESH_DEBUG_PRINTLN("onPeerDataRecv: possible replay attack detected");
     }
   }
+}
+
+void SensorMesh::handleIncomingMsg(uint8_t type, uint32_t sender_timestamp, uint8_t* data, uint flags, size_t len) {
+  MESH_DEBUG_PRINTLN("onPeerDataRecv: unsupported text type received: flags=%02x", (uint32_t)flags);
 }
 
 bool SensorMesh::onPeerPathRecv(mesh::Packet* packet, int sender_idx, const uint8_t* secret, uint8_t* path, uint8_t path_len, uint8_t extra_type, uint8_t* extra, uint8_t extra_len) {

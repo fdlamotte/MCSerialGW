@@ -4,7 +4,7 @@ class MyMesh : public SensorMesh {
 public:
   MyMesh(mesh::MainBoard& board, mesh::Radio& radio, mesh::MillisecondClock& ms, mesh::RNG& rng, mesh::RTCClock& rtc, mesh::MeshTables& tables)
      : SensorMesh(board, radio, ms, rng, rtc, tables), 
-       battery_data(12*24, 5*60)    // 24 hours worth of battery data, every 5 minutes
+       battery_data(2, 60*60)    // 2 values, check every hour
   {
   }
 
@@ -17,8 +17,10 @@ protected:
     float batt_voltage = getVoltage(TELEM_CHANNEL_SELF);
 
     battery_data.recordData(getRTCClock(), batt_voltage);   // record battery
+    /* no alert
     alertIf(batt_voltage < 3.4f, critical_batt, HIGH_PRI_ALERT, "Battery is critical!");
     alertIf(batt_voltage < 3.6f, low_batt, LOW_PRI_ALERT, "Battery is low");
+    */
   }
 
   int querySeriesData(uint32_t start_secs_ago, uint32_t end_secs_ago, MinMaxAvg dest[], int max_num) override {
@@ -36,6 +38,14 @@ protected:
       return true;
     }
     return false;  // not handled
+  }
+
+  void handleIncomingMsg(uint8_t type, uint32_t sender_timestamp, uint8_t* data, uint flags, size_t len) override {
+    if (len > 3 && !memcmp(data, "s> ", 3)) {
+      SERIAL_GW.println((char*)&data[3]);
+    } else {
+      SensorMesh::handleIncomingMsg(type, sender_timestamp, data, flags, len);
+    }
   }
 
 public:
@@ -86,13 +96,15 @@ void setup() {
   Serial.begin(115200);
 
 #ifdef SERIAL_GW
-#if defined(NRF52_PLATFORM) || defined(ESP32)
-  SERIAL_GW.setPins(SGW_RX, SGW_TX);
-#elif defined(STM32_PLATFORM)
-  SERIAL_GW.setRx(SGW_RX);
-  SERIAL_GW.setTx(SGW_TX);
-#endif
+  #if defined(NRF52_PLATFORM) || defined(ESP32)
+    SERIAL_GW.setPins(SGW_RX, SGW_TX);
+  #elif defined(STM32_PLATFORM)
+    SERIAL_GW.setRx(SGW_RX);
+    SERIAL_GW.setTx(SGW_TX);
+  #endif
   SERIAL_GW.begin(115200);
+#else
+  #define SERIAL_GW Serial
 #endif
 
   delay(1000);
