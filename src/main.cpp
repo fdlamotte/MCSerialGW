@@ -32,6 +32,7 @@ protected:
       return true;   // handled
     } else if (memcmp(command, "sout ", 5) == 0) {
       SERIAL_GW.println(&command[5]);
+      strcpy(reply, "ok");
       return true;
     }
     return false;  // not handled
@@ -85,8 +86,12 @@ void setup() {
   Serial.begin(115200);
 
 #ifdef SERIAL_GW
+#if defined(NRF52_PLATFORM) || defined(ESP32)
+  SERIAL_GW.setPins(SGW_RX, SGW_TX);
+#elif defined(STM32_PLATFORM)
   SERIAL_GW.setRx(SGW_RX);
   SERIAL_GW.setTx(SGW_TX);
+#endif
   SERIAL_GW.begin(115200);
 #endif
 
