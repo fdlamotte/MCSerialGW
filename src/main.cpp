@@ -1,5 +1,12 @@
 #include "SensorMesh.h"
 
+enum gw_mode_t {GW, CONFIG, BOTH};
+gw_mode_t gw_mode = BOTH;
+
+#ifndef SERIAL_GW
+  #define SERIAL_GW Serial
+#endif
+
 class MyMesh : public SensorMesh {
 public:
   MyMesh(mesh::MainBoard& board, mesh::Radio& radio, mesh::MillisecondClock& ms, mesh::RNG& rng, mesh::RTCClock& rtc, mesh::MeshTables& tables)
@@ -33,15 +40,19 @@ protected:
       strcpy(reply, "**Magic now done**");
       return true;   // handled
     } else if (memcmp(command, "sout ", 5) == 0) {
-      SERIAL_GW.println(&command[5]);
-      strcpy(reply, "ok");
+      if (gw_mode != CONFIG) {
+        SERIAL_GW.println(&command[5]);
+        strcpy(reply, "ok");
+      } else {
+        strcpy(reply, "config mode");
+      }
       return true;
     }
     return false;  // not handled
   }
 
   bool handleIncomingMsg(ContactInfo& from, uint32_t timestamp, uint8_t* data, uint flags, size_t len) override {
-    if (len > 3 && !memcmp(data, "s> ", 3)) {
+    if (len > 3 && !memcmp(data, "s> ", 3) && gw_mode != CONFIG) {
       data[len] = 0;
       SERIAL_GW.println((char*)&data[3]);
       return true;
@@ -54,31 +65,31 @@ public:
   void loop() {
     SensorMesh::loop();
 
-#ifdef SERIAL_GW
-    static char in_data[156];
-    static char out_data[160] = "s> ";
+    if (gw_mode != CONFIG) {
+      static char in_data[156];
+      static char out_data[160] = "s> ";
 
-    int len = strlen(in_data);
-    while (SERIAL_GW.available() && len < 155) {
-      char c = SERIAL_GW.read();
-      if (c != '\n') {
-        in_data[len++] = c;
-        in_data[len] = 0;
+      int len = strlen(in_data);
+      while (SERIAL_GW.available() && len < 155) {
+        char c = SERIAL_GW.read();
+        if (c != '\n') {
+          in_data[len++] = c;
+          in_data[len] = 0;
+        }
+      }
+      if (len == 155) {  // buffer full ... send
+        in_data[155] = '\r';
+      }
+
+      if (len > 0 && in_data[len - 1] == '\r') {  // received complete line
+        serial.text[0] = 0; // retrigger serial alert
+        in_data[len - 1] = 0;  // replace newline with C string null terminator
+        strncpy(&out_data[3], in_data, 156);
+        alertIf(true, serial, HIGH_PRI_ALERT, out_data);
+
+        in_data[0] = 0;  // reset buffer
       }
     }
-    if (len == 155) {  // buffer full ... send
-      in_data[155] = '\r';
-    }
-
-    if (len > 0 && in_data[len - 1] == '\r') {  // received complete line
-      serial.text[0] = 0; // retrigger serial alert
-      in_data[len - 1] = 0;  // replace newline with C string null terminator
-      strncpy(&out_data[3], in_data, 156);
-      alertIf(true, serial, HIGH_PRI_ALERT, out_data);
-
-      in_data[0] = 0;  // reset buffer
-    }
-#endif
   }
   /* ======================================================================= */
 };
@@ -95,19 +106,19 @@ void halt() {
 static char command[160];
 
 void setup() {
-  Serial.begin(115200);
 
-#ifdef SERIAL_GW
+#ifdef SGW_RX
   #if defined(NRF52_PLATFORM) || defined(ESP32)
     SERIAL_GW.setPins(SGW_RX, SGW_TX);
   #elif defined(STM32_PLATFORM)
     SERIAL_GW.setRx(SGW_RX);
     SERIAL_GW.setTx(SGW_TX);
   #endif
-  SERIAL_GW.begin(115200);
-#else
-  #define SERIAL_GW Serial
 #endif
+
+  Serial.begin(115200);
+  if (SERIAL_GW != Serial) 
+    SERIAL_GW.begin(115200);
 
   delay(1000);
 
@@ -144,9 +155,26 @@ void setup() {
     store.save("_main", the_mesh.self_id);
   }
 
-  Serial.print("Sensor ID: ");
-  mesh::Utils::printHex(Serial, the_mesh.self_id.pub_key, PUB_KEY_SIZE); Serial.println();
+#ifdef MODE_PIN
+  #ifndef MODE_PIN_CONFIG
+    #define MODE_PIN_CONFIG LOW
+  #endif
+  #ifndef MODE_PIN_MODE
+    #define MODE_PIN_MODE INPUT
+  #endif
+  pinMode(MODE_PIN, MODE_PIN_MODE);
+  if (digitalRead(MODE_PIN) == MODE_PIN_CONFIG) {
+    gw_mode = CONFIG;
+  } else {
+    gw_mode = GW;
+  }
+#endif
 
+  if (gw_mode != GW) {
+    Serial.print("Sensor ID: ");
+    mesh::Utils::printHex(Serial, the_mesh.self_id.pub_key, PUB_KEY_SIZE);
+    Serial.println();
+  }
   command[0] = 0;
 
   sensors.begin();
@@ -158,30 +186,31 @@ void setup() {
 }
 
 void loop() {
-  int len = strlen(command);
-  while (Serial.available() && len < sizeof(command)-1) {
-    char c = Serial.read();
-    if (c != '\n') {
-      command[len++] = c;
-      command[len] = 0;
+  if (!gw_mode == GW) { // don't process Serial if in GW only mode
+    int len = strlen(command);
+    while (Serial.available() && len < sizeof(command)-1) {
+      char c = Serial.read();
+      if (c != '\n') {
+        command[len++] = c;
+        command[len] = 0;
+      }
+      Serial.print(c);
     }
-    Serial.print(c);
-  }
-  if (len == sizeof(command)-1) {  // command buffer full
-    command[sizeof(command)-1] = '\r';
-  }
-
-  if (len > 0 && command[len - 1] == '\r') {  // received complete line
-    command[len - 1] = 0;  // replace newline with C string null terminator
-    char reply[160];
-    the_mesh.handleCommand(0, command, reply);  // NOTE: there is no sender_timestamp via serial!
-    if (reply[0]) {
-      Serial.print("  -> "); Serial.println(reply);
+    if (len == sizeof(command)-1) {  // command buffer full
+      command[sizeof(command)-1] = '\r';
     }
 
-    command[0] = 0;  // reset command buffer
-  }
+    if (len > 0 && command[len - 1] == '\r') {  // received complete line
+      command[len - 1] = 0;  // replace newline with C string null terminator
+      char reply[160];
+      the_mesh.handleCommand(0, command, reply);  // NOTE: there is no sender_timestamp via serial!
+      if (reply[0]) {
+        Serial.print("  -> "); Serial.println(reply);
+      }
 
+      command[0] = 0;  // reset command buffer
+    }
+  }
   the_mesh.loop();
   sensors.loop();
 }
