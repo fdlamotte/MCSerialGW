@@ -40,12 +40,14 @@ protected:
     return false;  // not handled
   }
 
-  void handleIncomingMsg(uint8_t type, uint32_t sender_timestamp, uint8_t* data, uint flags, size_t len) override {
+  bool handleIncomingMsg(ContactInfo& from, uint32_t timestamp, uint8_t* data, uint flags, size_t len) override {
     if (len > 3 && !memcmp(data, "s> ", 3)) {
+      data[len] = 0;
       SERIAL_GW.println((char*)&data[3]);
-    } else {
-      SensorMesh::handleIncomingMsg(type, sender_timestamp, data, flags, len);
+      return true;
     }
+
+    return SensorMesh::handleIncomingMsg(from, timestamp, data, flags, len);
   }
 
 public:
@@ -72,7 +74,7 @@ public:
       serial.text[0] = 0; // retrigger serial alert
       in_data[len - 1] = 0;  // replace newline with C string null terminator
       strncpy(&out_data[3], in_data, 156);
-      alertIf(true, serial, LOW_PRI_ALERT, out_data);
+      alertIf(true, serial, HIGH_PRI_ALERT, out_data);
 
       in_data[0] = 0;  // reset buffer
     }

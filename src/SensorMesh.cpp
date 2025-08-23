@@ -390,8 +390,10 @@ void SensorMesh::sendAlert(ContactInfo* c, Trigger* t) {
   if (pkt) {
     if (c->out_path_len >= 0) {  // we have an out_path, so send DIRECT
       sendDirect(pkt, c->out_path, c->out_path_len);
+      MESH_DEBUG_PRINTLN("Sending direct");
     } else {
       sendFlood(pkt);
+      MESH_DEBUG_PRINTLN("Sending flood");
     }
   }
   t->send_expiry = futureMillis(ALERT_ACK_EXPIRY_MILLIS);
@@ -613,6 +615,23 @@ void SensorMesh::getPeerSharedSecret(uint8_t* dest_secret, int peer_idx) {
   }
 }
 
+void SensorMesh::sendAckTo(const ContactInfo& dest, uint32_t ack_hash) {
+  if (dest.out_path_len < 0) {
+    mesh::Packet* ack = createAck(ack_hash);
+    if (ack) sendFlood(ack, TXT_ACK_DELAY);
+  } else {
+    uint32_t d = TXT_ACK_DELAY;
+    if (getExtraAckTransmitCount() > 0) {
+      mesh::Packet* a1 = createMultiAck(ack_hash, 1);
+      if (a1) sendDirect(a1, dest.out_path, dest.out_path_len, d);
+      d += 300;
+    }
+
+    mesh::Packet* a2 = createAck(ack_hash);
+    if (a2) sendDirect(a2, dest.out_path, dest.out_path_len, d);
+  }
+}
+
 void SensorMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender_idx, const uint8_t* secret, uint8_t* data, size_t len) {
   int i = matching_peer_indexes[sender_idx];
   if (i < 0 || i >= num_contacts) {
@@ -657,9 +676,24 @@ void SensorMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender_i
     uint flags = (data[4] >> 2);   // message attempt number, and other flags
 
     if (sender_timestamp > from.last_timestamp) {  // prevent replay attacks
-      if (!(flags == TXT_TYPE_CLI_DATA)) {
-        handleIncomingMsg(type, sender_timestamp, &data[5], flags, len - 5);
-      } else {  
+      if (flags == TXT_TYPE_PLAIN) {
+        bool handled = handleIncomingMsg(from, sender_timestamp, &data[5], flags, len - 5);
+        if (handled) { // if msg was handled then send an ack
+          uint32_t ack_hash;    // calc truncated hash of the message timestamp + text + sender pub_key, to prove to sender that we got it
+          mesh::Utils::sha256((uint8_t *) &ack_hash, 4, data, 5 + strlen((char *)&data[5]), from.id.pub_key, PUB_KEY_SIZE);
+
+          if (packet->isRouteFlood()) {
+            // let this sender know path TO here, so they can use sendDirect(), and ALSO encode the ACK
+            mesh::Packet* path = createPathReturn(from.id, secret, packet->path, packet->path_len,
+                                                    PAYLOAD_TYPE_ACK, (uint8_t *) &ack_hash, 4);
+            MESH_DEBUG_PRINTLN("Sending ack + path");
+            if (path) sendFlood(path, TXT_ACK_DELAY);
+          } else {
+            MESH_DEBUG_PRINTLN("Sending direct ack");
+            sendAckTo(from, ack_hash);
+          }          
+        }
+      } else if (flags == TXT_TYPE_CLI_DATA) {  
         from.last_timestamp = sender_timestamp;
         from.last_activity = getRTCClock()->getCurrentTime();
 
@@ -690,6 +724,8 @@ void SensorMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender_i
             }
           }
         }
+      } else {
+        MESH_DEBUG_PRINTLN("onPeerDataRecv: unsupported text type received: flags=%02x", (uint32_t)flags);
       }
     } else {
       MESH_DEBUG_PRINTLN("onPeerDataRecv: possible replay attack detected");
@@ -697,8 +733,13 @@ void SensorMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender_i
   }
 }
 
-void SensorMesh::handleIncomingMsg(uint8_t type, uint32_t sender_timestamp, uint8_t* data, uint flags, size_t len) {
-  MESH_DEBUG_PRINTLN("onPeerDataRecv: unsupported text type received: flags=%02x", (uint32_t)flags);
+bool SensorMesh::handleIncomingMsg(ContactInfo& from, uint32_t timestamp, uint8_t* data, uint flags, size_t len) {
+  MESH_DEBUG_PRINT("handleIncomingMsg: unhandled msg from ");
+  #ifdef MESH_DEBUG
+  mesh::Utils::printHex(Serial, from.id.pub_key, PUB_KEY_SIZE);
+  Serial.printf(": %s\n", data);
+  #endif
+  return false;
 }
 
 bool SensorMesh::onPeerPathRecv(mesh::Packet* packet, int sender_idx, const uint8_t* secret, uint8_t* path, uint8_t path_len, uint8_t extra_type, uint8_t* extra, uint8_t extra_len) {
@@ -731,6 +772,7 @@ void SensorMesh::onAckRecv(mesh::Packet* packet, uint32_t ack_crc) {
     auto t = alert_tasks[0];   // check current alert task
     for (int i = 0; i < t->attempt; i++) {
       if (ack_crc == t->expected_acks[i]) {   // matching ACK!
+        MESH_DEBUG_PRINTLN("Matched ACK");
         t->attempt = 4;  // signal to move to next contact
         t->send_expiry = 0;
         packet->markDoNotRetransmit();   // ACK was for this node, so don't retransmit
