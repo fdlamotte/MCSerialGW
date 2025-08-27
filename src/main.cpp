@@ -36,8 +36,14 @@ protected:
   }
 
   bool handleCustomCommand(uint32_t sender_timestamp, char* command, char* reply) override {
-    if (strcmp(command, "magic") == 0) {    // example 'custom' command handling
-      strcpy(reply, "**Magic now done**");
+    if (strncmp(command, "config ", 7) == 0) {    // example 'custom' command handling
+      if (strcmp(command+7, "on") == 0) {
+        gw_mode = CONFIG;
+        strcpy(reply, "Config mode");
+      } else {
+        gw_mode = GW;
+        strcpy(reply, "Gateway mode");
+      }
       return true;   // handled
     } else if (memcmp(command, "sout ", 5) == 0) {
       if (gw_mode != CONFIG) {
