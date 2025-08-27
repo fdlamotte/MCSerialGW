@@ -179,6 +179,10 @@ void setup() {
 
   sensors.begin();
 
+#ifdef P_LORA_TX_LED
+  pinMode(P_LORA_TX_LED, OUTPUT);
+#endif
+
   the_mesh.begin(fs);
 
   // send out initial Advertisement to the mesh
