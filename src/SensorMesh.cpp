@@ -390,10 +390,8 @@ void SensorMesh::sendAlert(ContactInfo* c, Trigger* t) {
   if (pkt) {
     if (c->out_path_len >= 0) {  // we have an out_path, so send DIRECT
       sendDirect(pkt, c->out_path, c->out_path_len);
-      MESH_DEBUG_PRINTLN("Sending direct");
     } else {
       sendFlood(pkt);
-      MESH_DEBUG_PRINTLN("Sending flood");
     }
   }
   t->send_expiry = futureMillis(ALERT_ACK_EXPIRY_MILLIS);
@@ -686,10 +684,8 @@ void SensorMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender_i
             // let this sender know path TO here, so they can use sendDirect(), and ALSO encode the ACK
             mesh::Packet* path = createPathReturn(from.id, secret, packet->path, packet->path_len,
                                                     PAYLOAD_TYPE_ACK, (uint8_t *) &ack_hash, 4);
-            MESH_DEBUG_PRINTLN("Sending ack + path");
             if (path) sendFlood(path, TXT_ACK_DELAY);
           } else {
-            MESH_DEBUG_PRINTLN("Sending direct ack");
             sendAckTo(from, ack_hash);
           }          
         }
@@ -772,7 +768,6 @@ void SensorMesh::onAckRecv(mesh::Packet* packet, uint32_t ack_crc) {
     auto t = alert_tasks[0];   // check current alert task
     for (int i = 0; i < t->attempt; i++) {
       if (ack_crc == t->expected_acks[i]) {   // matching ACK!
-        MESH_DEBUG_PRINTLN("Matched ACK");
         t->attempt = 4;  // signal to move to next contact
         t->send_expiry = 0;
         packet->markDoNotRetransmit();   // ACK was for this node, so don't retransmit
@@ -840,6 +835,20 @@ bool SensorMesh::formatFileSystem() {
     #error "need to implement file system erase"
     return false;
 #endif
+}
+
+void SensorMesh::saveIdentity(const mesh::LocalIdentity& new_id) {
+  self_id = new_id;
+#if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
+  IdentityStore store(*_fs, "");
+#elif defined(ESP32)
+  IdentityStore store(*_fs, "/identity");
+#elif defined(RP2040_PLATFORM)
+  IdentityStore store(*_fs, "/identity");
+#else
+  #error "need to define saveIdentity()"
+#endif
+  store.save("_main", self_id);
 }
 
 void SensorMesh::applyTempRadioParams(float freq, float bw, uint8_t sf, uint8_t cr, int timeout_mins) {
