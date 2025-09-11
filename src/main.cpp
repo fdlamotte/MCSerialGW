@@ -6,6 +6,9 @@ gw_mode_t gw_mode = BOTH;
 #ifndef SERIAL_GW
   #define SERIAL_GW Serial
 #endif
+#ifndef SERIAL_GW_BAUDRATE
+  #define SERIAL_GW_BAUDRATE 115200
+#endif
 
 class MyMesh : public SensorMesh {
 public:
@@ -122,9 +125,10 @@ void setup() {
   #endif
 #endif
 
-  Serial.begin(115200);
-  if (SERIAL_GW != Serial) 
-    SERIAL_GW.begin(115200);
+  SERIAL_GW.begin(SERIAL_GW_BAUDRATE);
+  if (SERIAL_GW != Serial) {
+    Serial.begin(115200);
+  }
 
   delay(1000);
 
