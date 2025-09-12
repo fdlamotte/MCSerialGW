@@ -70,14 +70,14 @@ protected:
     return SensorMesh::handleIncomingMsg(from, timestamp, data, flags, len);
   }
 
+  char in_data[156];
+  char out_data[160] = "s> ";
+  
 public:
   void loop() {
     SensorMesh::loop();
 
     if (gw_mode != CONFIG) {
-      static char in_data[156];
-      static char out_data[160] = "s> ";
-
       int len = strlen(in_data);
       while (SERIAL_GW.available() && len < 155) {
         char c = SERIAL_GW.read();
