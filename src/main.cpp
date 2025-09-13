@@ -60,7 +60,7 @@ protected:
     return false;  // not handled
   }
 
-  bool handleIncomingMsg(ContactInfo& from, uint32_t timestamp, uint8_t* data, uint flags, size_t len) override {
+  bool handleIncomingMsg(ClientInfo& from, uint32_t timestamp, uint8_t* data, uint flags, size_t len) override {
     if (len > 3 && !memcmp(data, "s> ", 3) && gw_mode != CONFIG) {
       data[len] = 0;
       SERIAL_GW.println((char*)&data[3]);
