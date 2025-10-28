@@ -122,6 +122,9 @@ void setup() {
   #elif defined(STM32_PLATFORM)
     SERIAL_GW.setRx(SGW_RX);
     SERIAL_GW.setTx(SGW_TX);
+  #elif defined(RP2040_PLATFORM)
+    SERIAL_GW.setRX(SGW_RX);
+    SERIAL_GW.setTX(SGW_TX);
   #endif
 #endif
 
