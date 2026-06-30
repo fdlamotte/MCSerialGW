@@ -22,6 +22,7 @@
 #include <helpers/CommonCLI.h>
 #include <helpers/StatsFormatHelper.h>
 #include <helpers/ClientACL.h>
+#include <helpers/RegionMap.h>
 #include <RTClib.h>
 #include <target.h>
 
@@ -33,11 +34,11 @@
 #define PERM_RECV_ALERTS_HI    (1 << 7)   // high priority alerts
 
 #ifndef FIRMWARE_BUILD_DATE
-  #define FIRMWARE_BUILD_DATE   "2 Oct 2025"
+  #define FIRMWARE_BUILD_DATE   "6 Jun 2026"
 #endif
 
 #ifndef FIRMWARE_VERSION
-  #define FIRMWARE_VERSION   "v1.9.1"
+  #define FIRMWARE_VERSION   "v1.16.0"
 #endif
 
 #define FIRMWARE_ROLE "sensor"
@@ -60,13 +61,13 @@ public:
   NodePrefs* getNodePrefs() { return &_prefs; }
   void savePrefs() override { _cli.savePrefs(_fs); }
   bool formatFileSystem() override;
-  void sendSelfAdvertisement(int delay_millis) override;
+  void sendSelfAdvertisement(int delay_millis, bool flood) override;
   void updateAdvertTimer() override;
   void updateFloodAdvertTimer() override;
   void setLoggingOn(bool enable) override {  }
   void eraseLogFile() override { }
   void dumpLogFile() override { }
-  void setTxPower(uint8_t power_dbm) override;
+  void setTxPower(int8_t power_dbm) override;
   void formatNeighborsReply(char *reply) override {
     strcpy(reply, "not supported");
   }
@@ -119,6 +120,7 @@ protected:
   uint32_t getRetransmitDelay(const mesh::Packet* packet) override;
   uint32_t getDirectRetransmitDelay(const mesh::Packet* packet) override;
   int getInterferenceThreshold() const override;
+  bool getCADEnabled() const override;
   int getAGCResetInterval() const override;
   void onAnonDataRecv(mesh::Packet* packet, const uint8_t* secret, const mesh::Identity& sender, uint8_t* data, size_t len) override;
   int searchPeersByHash(const uint8_t* hash) override;
@@ -127,17 +129,20 @@ protected:
   bool onPeerPathRecv(mesh::Packet* packet, int sender_idx, const uint8_t* secret, uint8_t* path, uint8_t path_len, uint8_t extra_type, uint8_t* extra, uint8_t extra_len) override;
   void onControlDataRecv(mesh::Packet* packet) override;
   void onAckRecv(mesh::Packet* packet, uint32_t ack_crc) override;
-  virtual bool handleIncomingMsg(ClientInfo& from, uint32_t timestamp, uint8_t* data, uint flags, size_t len);
-  void sendAckTo(const ClientInfo& dest, uint32_t ack_hash);
+  virtual bool handleIncomingMsg(ClientInfo& from, uint32_t timestamp, uint8_t* data, uint8_t flags, size_t len);
+  void sendAckTo(const ClientInfo& dest, uint32_t ack_hash, uint8_t path_hash_size=1);
 private:
   FILESYSTEM* _fs;
   unsigned long next_local_advert, next_flood_advert;
   NodePrefs _prefs;
+  ClientACL  acl;
   CommonCLI _cli;
   uint8_t reply_data[MAX_PACKET_PAYLOAD];
-  ClientACL  acl;
   unsigned long dirty_contacts_expiry;
   CayenneLPP telemetry;
+  TransportKeyStore key_store;
+  RegionMap region_map;
+  TransportKey default_scope;
   uint32_t last_read_time;
   int matching_peer_indexes[MAX_SEARCH_RESULTS];
   int num_alert_tasks;
@@ -148,7 +153,7 @@ private:
   uint8_t pending_sf;
   uint8_t pending_cr;
 
-  uint8_t handleLoginReq(const mesh::Identity& sender, const uint8_t* secret, uint32_t sender_timestamp, const uint8_t* data);
+  uint8_t handleLoginReq(const mesh::Identity& sender, const uint8_t* secret, uint32_t sender_timestamp, const uint8_t* data, bool is_flood);
   uint8_t handleRequest(uint8_t perms, uint32_t sender_timestamp, uint8_t req_type, uint8_t* payload, size_t payload_len);
   mesh::Packet* createSelfAdvert();
 

@@ -60,7 +60,7 @@ protected:
     return false;  // not handled
   }
 
-  bool handleIncomingMsg(ClientInfo& from, uint32_t timestamp, uint8_t* data, uint flags, size_t len) override {
+  bool handleIncomingMsg(ClientInfo& from, uint32_t timestamp, uint8_t* data, uint8_t flags, size_t len) override {
     if (len > 3 && !memcmp(data, "s> ", 3) && gw_mode != CONFIG) {
       data[len] = 0;
       SERIAL_GW.println((char*)&data[3]);
@@ -139,7 +139,7 @@ void setup() {
 
   if (!radio_init()) { halt(); }
 
-  fast_rng.begin(radio_get_rng_seed());
+  fast_rng.begin(radio_driver.getRngSeed());
 
   FILESYSTEM* fs;
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
@@ -199,7 +199,7 @@ void setup() {
   the_mesh.begin(fs);
 
   // send out initial Advertisement to the mesh
-  the_mesh.sendSelfAdvertisement(16000);
+  the_mesh.sendSelfAdvertisement(16000, false);
 }
 
 void loop() {
